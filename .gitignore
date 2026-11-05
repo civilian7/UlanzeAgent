@@ -1,0 +1,12 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Runtime output (stt.log contains dictated text)
+*.log
+run.out
+nohup.out
+
+# Personal voice recordings and their reference text
+bench/samples/

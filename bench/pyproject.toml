@@ -1,0 +1,11 @@
+[project]
+name = "ulanze-bench"
+version = "0.1.0"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "faster-whisper>=1.1.0",
+    "sounddevice>=0.5",
+    "numpy>=1.26",
+    "nvidia-cublas-cu12==12.4.5.8",
+    "nvidia-cudnn-cu12==9.*",
+]

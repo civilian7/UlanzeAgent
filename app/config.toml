@@ -1,0 +1,32 @@
+[hotkey]
+key = "f13"              # Ulanzi Studio에서 Voice Key에 지정한 키
+min_seconds = 0.4        # 이보다 짧은 입력은 무시
+
+[audio]
+device = "AU05"         # 입력 장치 이름 일부 (없으면 기본 장치)
+preroll_ms = 300         # 키 누르기 직전 오디오도 포함 (첫 음절 잘림 방지)
+max_seconds = 90
+
+[whisper]
+model = "large-v3-turbo"
+compute_type = "float16"
+language = "ko"
+beam_size = 5
+# 자주 쓰는 용어를 넣으면 인식률이 크게 오른다 (bench 결과 CER 12% -> 6%)
+initial_prompt = "깃허브, 클로드 코드, JSON, README, faster-whisper, 파이썬 가상환경, API, 마이그레이션, 롤백"
+
+[output]
+restore_clipboard = true
+beep = true
+
+# 후처리: 인식된 그대로 -> 원하는 표기 (정확히 일치하는 부분 문자열 치환)
+[replacements]
+"GitHub" = "깃허브"
+"제이슨" = "JSON"
+"링트" = "린트"
+"가산 환경" = "가상환경"
+"패스트 위스퍼" = "faster-whisper"
+
+# Whisper가 무음에서 만들어내는 대표적 환각 문구 (전체가 일치하면 버림)
+[hallucinations]
+phrases = ["시청해 주셔서 감사합니다", "구독과 좋아요 부탁드립니다", "감사합니다", "MBC 뉴스"]
