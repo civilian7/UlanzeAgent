@@ -60,19 +60,40 @@ class Recorder:
                                      blocksize=int(self.rate * self.BLOCK / SR), callback=self._cb)
         log.info("마이크: [%s] %s @ %dHz", idx, info["name"], self.rate)
 
-    def _find(self, name):
+    def _find(self, spec):
+        """spec: ""/"default" = Windows 기본 마이크, 정수(또는 숫자 문자열) = 장치 번호,
+        그 외 문자열 = 장치 이름의 일부. 못 찾으면 기본 마이크로 대체한다."""
         sd = self.sd
         devs = sd.query_devices()
-        if name:
-            cands = [(i, d) for i, d in enumerate(devs)
-                     if d["max_input_channels"] > 0 and name.lower() in d["name"].lower()]
-            for i, d in cands:  # MME 우선 (자동 리샘플링)
-                if "MME" in sd.query_hostapis(d["hostapi"])["name"]:
-                    return i, d
-            if cands:
-                return cands[0]
-            log.warning("'%s' 장치를 찾지 못해 기본 입력 장치를 사용", name)
+        spec = spec.strip() if isinstance(spec, str) else spec
+        if spec not in ("", None, "default"):
+            if isinstance(spec, int) or (isinstance(spec, str) and spec.isdigit()):
+                i = int(spec)
+                if 0 <= i < len(devs) and devs[i]["max_input_channels"] > 0:
+                    return i, devs[i]
+                log.warning("장치 번호 %s는 입력 장치가 아니라 기본 입력 장치를 사용", spec)
+            else:
+                cands = [(i, d) for i, d in enumerate(devs)
+                         if d["max_input_channels"] > 0 and spec.lower() in d["name"].lower()]
+                # 호스트 API 우선순위: MME(자동 리샘플링) > DirectSound > WASAPI > 나머지(WDM-KS 등).
+                # 같은 우선순위에서는 이름에 마이크/mic 이 있는 장치를 먼저 (라인·SPDIF 입력 회피).
+                prio = {"MME": 0, "Windows DirectSound": 1, "Windows WASAPI": 2}
+
+                def rank(c):
+                    i, d = c
+                    api = sd.query_hostapis(d["hostapi"])["name"]
+                    mic = any(w in d["name"].lower() for w in ("마이크", "mic"))
+                    return (prio.get(api, 3), 0 if mic else 1, i)
+
+                if cands:
+                    return min(cands, key=rank)
+                log.warning("'%s' 장치를 찾지 못해 기본 입력 장치를 사용", spec)
         i = sd.default.device[0]
+        if i is None or i < 0 or devs[i]["max_input_channels"] <= 0:
+            inputs = [k for k, d in enumerate(devs) if d["max_input_channels"] > 0]
+            if not inputs:
+                raise RuntimeError("사용 가능한 마이크(입력 장치)가 없습니다")
+            i = inputs[0]
         return i, devs[i]
 
     def _cb(self, data, frames, t, status):
@@ -100,6 +121,75 @@ class Recorder:
             n = int(len(a) * SR / self.rate)
             a = np.interp(np.linspace(0, len(a) - 1, n), np.arange(len(a)), a)
         return a.astype(np.float32)
+
+
+def list_input_devices():
+    """입력 장치 목록 출력. 같은 장치가 호스트 API별로 중복되므로 MME 항목만 보인다."""
+    import sounddevice as sd
+    default = sd.default.device[0]
+    for i, d in enumerate(sd.query_devices()):
+        if d["max_input_channels"] > 0 and "MME" in sd.query_hostapis(d["hostapi"])["name"]:
+            mark = "  <- Windows 기본" if i == default else ""
+            print(f"[{i}] {d['name']}  ({d['default_samplerate']:.0f}Hz){mark}")
+    print("\nconfig.toml의 [audio] device 에 이름 일부(예: \"USB\") 또는 위 번호를 적으세요. "
+          "비워 두면 Windows 기본 마이크를 씁니다.")
+
+
+class Hotkey:
+    """'f13', 'ctrl+win', 'right ctrl' 같은 키 조합. 모든 키가 눌려 있는 동안 활성."""
+
+    ALIAS = {"win": "windows", "control": "ctrl", "return": "enter", "escape": "esc",
+             "scrolllock": "scroll lock", "caps": "caps lock"}
+    PRINTING = {"space", "enter", "tab"}
+
+    def __init__(self, spec):
+        self.spec = spec
+        toks = [t.strip().lower() for t in spec.split("+") if t.strip()]
+        self.tokens = frozenset(self.ALIAS.get(t, t) for t in toks)
+        # 글자를 입력하는 키가 들어 있으면 그 글자가 활성 창에도 그대로 입력된다.
+        self.types_text = any(len(t) == 1 or t in self.PRINTING for t in self.tokens)
+
+
+class HotkeyTracker:
+    """키 이벤트로부터 녹음 시작/종료 시점을 판정한다 (키보드 훅과 분리해 테스트 가능)."""
+
+    def __init__(self, specs):
+        if isinstance(specs, str):
+            specs = [specs]
+        self.hotkeys = [Hotkey(s) for s in specs]
+        self.pressed, self.active = set(), None
+
+    @staticmethod
+    def _names(name, scan_code):
+        names = set()
+        if name:
+            name = name.lower()
+            names.add(name)
+            for side in ("left ", "right "):  # 'right ctrl' 은 'ctrl' 로도 취급
+                if name.startswith(side):
+                    names.add(name[len(side):])
+        if scan_code == 100:  # F13 은 키보드 라이브러리가 이름을 못 붙이는 경우가 있음
+            names.add("f13")
+        return names
+
+    def feed(self, name, scan_code, is_down):
+        """'start' / 'stop' / None 을 돌려준다."""
+        names = self._names(name, scan_code)
+        if not names:
+            return None
+        if is_down:
+            self.pressed |= names
+            if self.active is None:
+                for hk in self.hotkeys:
+                    if hk.tokens and hk.tokens <= self.pressed:
+                        self.active = hk
+                        return "start"
+        else:
+            self.pressed -= names
+            if self.active is not None and not self.active.tokens <= self.pressed:
+                self.active = None
+                return "stop"
+        return None
 
 
 class Transcriber:
@@ -165,24 +255,22 @@ class App:
         self.rec = Recorder(cfg)
         self.tr = Transcriber(cfg)
         self.q = queue.Queue()
-        self.down = False
+        self.keys = HotkeyTracker(cfg["hotkey"]["key"])
+        for hk in self.keys.hotkeys:
+            if hk.types_text:
+                log.warning("트리거 '%s'에 글자 키가 있어 누를 때 그 글자도 입력됩니다. "
+                            "F키나 Ctrl/Win 같은 조합키를 권장합니다", hk.spec)
         self.icon = None
 
     def on_key(self, e):
         import keyboard
-        if e.name != self.cfg["hotkey"]["key"] and e.scan_code != 100:  # 100 = F13 스캔코드
-            log.debug("무시된 키: %r scan=%s", e.name, e.scan_code)
-            return
-        if e.event_type == keyboard.KEY_DOWN:
-            if self.down:  # 키 반복 무시
-                return
-            self.down = True
+        action = self.keys.feed(e.name, e.scan_code, e.event_type == keyboard.KEY_DOWN)
+        if action == "start":
             self.rec.start()
             self.set_state("rec")
             if self.cfg["output"]["beep"]:
                 threading.Thread(target=beep, args=(880, 60), daemon=True).start()
-        elif self.down:
-            self.down = False
+        elif action == "stop":
             self.q.put(self.rec.stop())
 
     def worker(self):
@@ -223,7 +311,8 @@ class App:
         threading.Thread(target=self.worker, daemon=True).start()
         self.icon = pystray.Icon("ulanze-stt", self.make_icon("idle"), "대기",
                                  pystray.Menu(pystray.MenuItem("종료", lambda i, _: i.stop())))
-        log.info("준비 완료. %s 키를 누른 채로 말하세요.", self.cfg["hotkey"]["key"].upper())
+        log.info("준비 완료. %s 를 누른 채로 말하세요.",
+                 " 또는 ".join(h.spec.upper() for h in self.keys.hotkeys))
         self.icon.run()
         self.rec.stream.stop()
 
@@ -234,12 +323,39 @@ def load_wav(path):
     return np.frombuffer(raw, np.int16).astype(np.float32) / 32768
 
 
+def test_hotkeys():
+    """키 판정 로직을 가짜 이벤트로 점검한다 (실제 키보드가 필요 없음)."""
+    def run(specs, events):
+        t, out = HotkeyTracker(specs), []
+        for name, scan, down in events:
+            out.append(t.feed(name, scan, down))
+        return [x for x in out if x]
+
+    D, U = True, False
+    cases = [
+        ("단일키 f13 (이름)", ["f13"], [("f13", 100, D), ("f13", 100, D), ("f13", 100, U)], ["start", "stop"]),
+        ("단일키 f13 (이름 없음, 스캔코드만)", ["f13"], [(None, 100, D), (None, 100, U)], ["start", "stop"]),
+        ("조합 ctrl+win", ["ctrl+win"],
+         [("ctrl", 29, D), ("left windows", 91, D), ("left windows", 91, U), ("ctrl", 29, U)], ["start", "stop"]),
+        ("조합은 일부만 눌러선 시작 안 함", ["ctrl+win"], [("ctrl", 29, D), ("ctrl", 29, U)], []),
+        ("right ctrl 지정", ["right ctrl"], [("right ctrl", 285, D), ("right ctrl", 285, U)], ["start", "stop"]),
+        ("ctrl 지정은 right ctrl로도 동작", ["ctrl"], [("right ctrl", 285, D), ("right ctrl", 285, U)], ["start", "stop"]),
+        ("후보 여러 개 중 하나", ["f13", "scroll lock"], [("scroll lock", 70, D), ("scroll lock", 70, U)], ["start", "stop"]),
+        ("관계없는 키는 무시", ["f13"], [("a", 30, D), ("a", 30, U)], []),
+    ]
+    ok = True
+    for title, specs, events, want in cases:
+        got = run(specs, events)
+        ok &= got == want
+        print(f"  {'OK ' if got == want else 'FAIL'} {title}: {got}")
+    return ok
+
+
 def selftest(cfg):
-    import keyboard
-    hits = []
-    keyboard.hook(lambda e: hits.append((e.event_type, e.name, e.scan_code)) if e.name == "f13" else None)
-    keyboard.press("f13"); time.sleep(0.1); keyboard.release("f13"); time.sleep(0.2)
-    print("F13 훅:", hits or "감지 안 됨")
+    print("핫키 판정 로직:")
+    if not test_hotkeys():
+        print("  -> 실패")
+    print("설정된 트리거:", cfg["hotkey"]["key"])
     tr = Transcriber(cfg)
     for f in sorted((ROOT.parent / "bench" / "samples").glob("0[2-5].wav")):
         print(f.name, "->", tr(load_wav(f)))
@@ -257,7 +373,11 @@ if __name__ == "__main__":
                         handlers=handlers)
     ap = argparse.ArgumentParser()
     ap.add_argument("--selftest", action="store_true")
+    ap.add_argument("--devices", action="store_true", help="마이크(입력 장치) 목록을 보고 종료")
     args = ap.parse_args()
+    if args.devices:
+        list_input_devices()
+        sys.exit(0)
     if not args.selftest and not single_instance():
         log.info("이미 실행 중이라 종료합니다")
         sys.exit(0)

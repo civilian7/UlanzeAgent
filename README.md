@@ -1,6 +1,6 @@
 # UlanzeAgent
 
-Ulanzi AU05 Vibe Key의 Voice Key(F13)를 누르고 있는 동안 말하면, 로컬 GPU에서 Whisper(`large-v3-turbo`, faster-whisper)가 인식한 한국어 텍스트를 현재 커서 위치에 붙여넣는 Windows용 음성 입력 도구입니다. Windows 내장 음성 입력(Win+H)보다 인식률을 높이는 것이 목적입니다.
+키를 누르고 있는 동안 말하면(기본은 Ulanzi AU05 Vibe Key의 Voice Key = F13, **일반 마이크와 키보드 조합으로도 사용 가능**), 로컬 GPU에서 Whisper(`large-v3-turbo`, faster-whisper)가 인식한 한국어 텍스트를 현재 커서 위치에 붙여넣는 Windows용 음성 입력 도구입니다. Windows 내장 음성 입력(Win+H)보다 인식률을 높이는 것이 목적입니다.
 
 ```
 Voice Key(F13) 누름 -> AU05 마이크 녹음 -> faster-whisper(CUDA) -> 용어 치환 -> Ctrl+V 붙여넣기

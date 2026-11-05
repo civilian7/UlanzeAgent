@@ -1,9 +1,17 @@
 [hotkey]
-key = "f13"              # Ulanzi Studio에서 Voice Key에 지정한 키
+# 누르고 있는 동안 녹음하는 키. 문자열 하나 또는 목록 (어느 하나라도 눌리면 동작).
+#   Ulanzi Vibe Key : "f13"  (Ulanzi Studio에서 Voice Key에 지정)
+#   일반 키보드     : "ctrl+win", "right ctrl", "scroll lock", "f9" 등
+#   예) key = ["f13", "ctrl+win"]
+# 글자 키(space 등)가 들어간 조합은 그 글자가 활성 창에도 입력되므로 권장하지 않는다.
+key = "f13"
 min_seconds = 0.4        # 이보다 짧은 입력은 무시
 
 [audio]
-device = "AU05"         # 입력 장치 이름 일부 (없으면 기본 장치)
+# 사용할 마이크. ""(또는 "default") = Windows 기본 마이크, 숫자 = 장치 번호,
+# 그 외 = 장치 이름의 일부. 번호와 이름은 `uv run stt.py --devices` 로 확인.
+# 못 찾으면 기본 마이크로 대체하고 로그에 경고를 남긴다.
+device = "AU05"
 preroll_ms = 300         # 키 누르기 직전 오디오도 포함 (첫 음절 잘림 방지)
 max_seconds = 90
 
