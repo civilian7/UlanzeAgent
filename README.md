@@ -29,4 +29,8 @@ uv run stt.py
 
 ## 참고
 
-이 프로젝트는 Ulanzi와 무관한 개인 프로젝트입니다. Whisper 모델과 faster-whisper는 각 프로젝트의 라이선스를 따릅니다.
+이 프로젝트는 Ulanzi와 무관한 개인 프로젝트입니다.
+
+## 라이선스
+
+[MIT](LICENSE). 사용하는 라이브러리와 모델의 라이선스는 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)를 보세요.
